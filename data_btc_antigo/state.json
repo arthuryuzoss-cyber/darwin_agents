@@ -1,0 +1,26 @@
+{
+  "tick_no": 400,
+  "graveyard": [
+    {
+      "name": "alpha",
+      "parent": null,
+      "generation": 1,
+      "reason": "PnL líquido do ciclo R$ 0.00 <= 0",
+      "tick": 399,
+      "params": {
+        "fast": 9,
+        "slow": 21,
+        "rsi_period": 14,
+        "rsi_oversold": 35.0,
+        "rsi_overbought": 70.0,
+        "sentiment_weight": 0.3,
+        "buy_threshold": 0.3,
+        "sell_threshold": -0.2,
+        "stop_loss_pct": 2.0,
+        "take_profit_pct": 3.0,
+        "position_fraction": 0.95
+      }
+    }
+  ],
+  "traders": []
+}
