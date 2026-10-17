@@ -98,6 +98,18 @@ class SimulateTests(unittest.TestCase):
         self.assertEqual(m["orders"], 20)
         self.assertLess(m["return_pct"], 0)
 
+    def test_buy_and_hold_benchmark_does_not_rebalance_daily(self):
+        test = [
+            {"t": 0, "sym": "A", "ret": 1.0, "y": 1, "x": []},
+            {"t": 0, "sym": "B", "ret": 0.0, "y": 0, "x": []},
+            {"t": 1, "sym": "A", "ret": -0.5, "y": 0, "x": []},
+            {"t": 1, "sym": "B", "ret": 0.0, "y": 0, "x": []},
+        ]
+        m = dr.simulate(test, [0.1] * len(test), (0, 2), cfg(), 0.5)
+        # A começa com 50%, dobra e depois perde metade; B fica estável.
+        # Carteira estática termina em (1.0 + 1.0) / 2 = 1.0? O capital de A volta ao inicial.
+        self.assertAlmostEqual(m["bh_return_pct"], 0.0, places=6)
+
 
 class WalkForwardTests(unittest.TestCase):
     def test_noise_gives_no_edge_and_signal_is_detected(self):

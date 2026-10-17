@@ -1,4 +1,21 @@
-**Versão 10** (igual ao número do zip `darwin_agents_v10.zip`). Para conferir se a colagem funcionou, rode `python main.py --version`: tem que mostrar `darwin_agents v10`. Toda execução também imprime essa versão na primeira linha.
+**Versão 16** (igual ao número do zip `darwin_agents_v16.zip`). Para conferir se a colagem funcionou, rode `python main.py --version`: tem que mostrar `darwin_agents v16`. Toda execução também imprime essa versão na primeira linha.
+
+## Alterações da v16
+- `python main.py signal`: momentum diário em PAPEL (BTC/ETH ou o que estiver em SYMBOLS). Uma decisão por dia, mesma lógica do
+  backtest `--momentum`, padrão média 150 dias / momentum 126-63 (platô do teste de sensibilidade, não o máximo).
+  Rode 1x por dia depois das 21h (00:00 UTC); se pular dias, refaz os perdidos. `--exposure 0.5` usa metade do caixa
+  (reduz a queda máxima para caber no fusível). Estado em `data/momentum_paper.json`; `--reset` recomeça.
+  Não usa chaves e não envia ordens.
+
+## Alterações da v15
+- `backtest --momentum --sensitivity`: roda 15 combinações de parâmetros (média 100–300 dias × momentum 63/126/189) no mesmo período e diz se o resultado é robusto ou sorte de parâmetro.
+
+## Alterações da v14
+- Inicialização recusa ordens abertas nos pares configurados e também recusa iniciar se não conseguir verificá-las
+  (antes uma ordem antiga podia executar fora do controle do robô). O simulador agora filtra ordens por par, como a Binance.
+- Benchmark "comprar e segurar" do `--direction` agora divide igualmente no início e NÃO rebalanceia todo dia.
+- O Monte Carlo do catálogo compara com a carteira igual REBALANCEADA diariamente (rotulado assim); a tabela ano a ano
+  e o resumo usam comprar-e-segurar estático. (Ideias de auditoria do GPT revisadas e aplicadas quando válidas.)
 
 # Agentes darwinianos de trade (Binance spot + Ollama local)
 
@@ -94,6 +111,29 @@ python main.py backtest --optimize --folds 3 --trials 30 --workers 2
   listados hoje (viés de sobrevivência: moedas que sumiram não entram); executa no preço de fechamento do candle;
   não modela impacto de ordens grandes; e o passado não prevê o futuro. Um backtest bom não é prova de lucro; um
   backtest ruim é um bom motivo para não operar.
+
+## Momentum diário com filtro de mercado (do projeto de ações)
+`python main.py download --days 1500 --timeframe 1d` e depois `python main.py backtest --momentum --timeframe 1d`.
+Só compra se o BTC está acima da média de 200 dias; escolhe 1 ativo por momentum de 63/126 dias (com histerese);
+decide no fechamento e executa na abertura seguinte; parâmetros fixos, blocos fora da amostra de 180 dias e comparação
+com comprar e segurar. Só mede; não opera.
+
+**Catálogo de longo prazo (histórico de ~9 anos, 2017+).** O `--momentum` agora também imprime uma tabela ano a ano
+(cada ano isolado, parâmetros fixos) e um Monte Carlo (bootstrap em blocos, pareado com a carteira parada).
+Pares em BRL só têm ~4 anos; para 9 anos use pares em USDT com um arquivo de configuração separado
+(o robô continua usando o `.env`):
+
+    copy .env.longo.example .env.longo
+    python main.py --env-file .env.longo download --days 3650 --timeframe 1d
+    python main.py --env-file .env.longo backtest --momentum --timeframe 1d --dir data_hist
+
+Ressalvas: USDT é só um substituto do BRL; os pares listados hoje sobreviveram (viés de sobrevivência);
+poucos trades = pouca confiança estatística.
+
+## Proteções (da pesquisa: Freqtrade protections)
+- **Cooldown** (`COOLDOWN_CANDLES=2`): depois de vender um ativo, não recompra por N candles (evita entrar e sair no mesmo ruído).
+- **StoplossGuard** (`STOPLOSS_GUARD=3`): 3 stop-loss em 24 candles pausam TODAS as novas compras por 12 candles.
+  Servem para cortar sequências de perdas, não para aumentar lucro. `0` desliga. No backtest: `--no-guards` compara sem elas.
 
 ## Renascimento (menos rígido)
 Se o último agente morre (ciclo com PnL ≤ 0), o robô não encerra mais: nasce `fenix1` (parâmetros do morto, mutados)
@@ -204,7 +244,7 @@ Ctrl+C para parar (avisa se há posição aberta; `run --liquidate-on-exit` vend
 ```bash
 python -m unittest discover -s tests -t . -v
 ```
-286 testes: unitário, integração (orquestrador + gateway + exchange simulada), segurança, funcional (CLI),
+324 testes: unitário, integração (orquestrador + gateway + exchange simulada), segurança, funcional (CLI),
 multiativo e backtest/histórico. Em teste de mutação, 15 defeitos (fusível, stop-loss, filtro XML, `--live`, token…) + 10 do
 multiativo (equity somando todos os ativos, liquidação por ativo, escolha do melhor sinal…) + 12 do backtest
 (olhar o futuro, escolha de parâmetros, fusível no replay, relógio simulado…) foram todos pegos pela suíte. Isso **não** substitui testar contra a Binance real.

@@ -53,6 +53,18 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaises(OrchestratorError):
             r.orch.bootstrap(1)
 
+    def test_refuses_to_bootstrap_with_open_orders(self):
+        r = Rig(quote=40.0)
+        r.sim.open_orders.append({"id": "old-order", "symbol": "BTC/BRL"})
+        with self.assertRaisesRegex(AccountNotClean, "ordem.*aberta"):
+            r.orch.bootstrap(1)
+
+    def test_refuses_to_bootstrap_if_open_orders_cannot_be_checked(self):
+        r = Rig(quote=40.0)
+        r.sim.inject_failures("fetch_open_orders", 1)
+        with self.assertRaisesRegex(AccountNotClean, "verificar ordens abertas"):
+            r.orch.bootstrap(1)
+
 
 class TradingCycleTests(unittest.TestCase):
     def rig(self, **kw):
@@ -169,7 +181,7 @@ class FuseTests(unittest.TestCase):
     def test_fuse_at_60pct_liquidates_cancels_and_stops(self):
         r = self.rig()
         self.assertEqual((r.breaker.initial_equity_cents, r.breaker.floor_cents), (4000, 1600))
-        r.sim.open_orders.append({"id": "pendente-1"})
+        r.sim.open_orders.append({"id": "pendente-1", "symbol": "BTC/BRL"})
         entry = r.orch.traders["alpha"].entry_price
         r.market.advance(entry * 0.35)  # queda de 65% entre dois ticks
         rep = r.orch.tick()

@@ -256,9 +256,15 @@ class SimExchange:
 
     def fetch_open_orders(self, symbol: str | None = None) -> list:
         self._enter("fetch_open_orders")
-        return list(self.open_orders)
+        if symbol is None:
+            return list(self.open_orders)
+        return [o for o in self.open_orders if o.get("symbol") == symbol]
 
     def cancel_all_orders(self, symbol: str | None = None) -> list:
         self._enter("cancel_all_orders")
-        canceled, self.open_orders = list(self.open_orders), []
+        if symbol is None:
+            canceled, self.open_orders = list(self.open_orders), []
+            return canceled
+        canceled = [o for o in self.open_orders if o.get("symbol") == symbol]
+        self.open_orders = [o for o in self.open_orders if o.get("symbol") != symbol]
         return canceled

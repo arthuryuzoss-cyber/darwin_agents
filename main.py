@@ -237,6 +237,28 @@ def cmd_download(cfg: Config, args, ccxt_module=None) -> int:
     return 0 if ok else 2
 
 
+def cmd_signal(cfg: Config, args, ccxt_module=None) -> int:
+    from darwin import momentum_paper as mp
+    from darwin.history import HistoryError, download_history, load_history
+    from dataclasses import replace as _rep
+    p = _rep(mp.DEFAULT_PARAMS, trend_n=args.trend_n, long=args.long, short=max(10, args.long // 2))
+    path = os.path.join(cfg.data_dir, "momentum_paper.json")
+    if args.reset and os.path.exists(path):
+        os.replace(path, path + ".bak")
+        print(f"Estado anterior guardado em {path}.bak")
+    try:
+        download_history(ccxt_module or _import_ccxt(), cfg.symbols, "1d", 420, args.dir, log=lambda *_: None)
+        hist = load_history(args.dir, cfg.symbols, "1d")
+        state = mp.load_state(path, cfg.bankroll_cents / 100.0)
+        new = mp.step(state, hist, list(cfg.symbols), p, exposure=args.exposure)
+        mp.save_state(path, state)
+    except (HistoryError, ExchangeError, mp.PaperError) as e:
+        print(f"ERRO: {e}")
+        return 2
+    print(mp.format_step(state, new, hist, p, args.exposure))
+    return 0
+
+
 def cmd_journal(cfg: Config, args) -> int:
     from darwin import journal as jn
     path = os.path.join(cfg.data_dir, "journal.csv")
@@ -266,10 +288,16 @@ def cmd_backtest(cfg: Config, args) -> int:
                            eval_min_roundtrips=cfg.eval_min_roundtrips, eval_max_ticks=cfg.eval_max_ticks,
                            max_population=cfg.max_population, max_generation=cfg.max_generation,
                            idle_kills=cfg.idle_kills, max_orders_per_hour=cfg.max_orders_per_hour,
-                           death_tolerance_pct=cfg.death_tolerance_pct, needs_min_trades=cfg.needs_min_trades)
+                           death_tolerance_pct=cfg.death_tolerance_pct, needs_min_trades=cfg.needs_min_trades,
+                           cooldown_candles=cfg.cooldown_candles, stoploss_guard=cfg.stoploss_guard)
     start = None
     if args.days:
         start = max(0, hist.n - int(args.days * 86_400_000 / TF_MS[tf]))
+    if args.no_guards:
+        bt = replace(bt, cooldown_candles=0, stoploss_guard=0)
+        print("Proteções (cooldown e StoplossGuard) DESLIGADAS neste backtest.")
+    else:
+        print(f"Proteções ligadas: cooldown {bt.cooldown_candles} candle(s), StoplossGuard {bt.stoploss_guard} stop(s).")
     if args.trend_filter and not args.optimize:
         bt = replace(bt, params=bk.default_params(True).to_dict())
         print(f"Filtro de tendência ligado (SMA de {bk.TREND_DEFAULT} candles).")
@@ -281,6 +309,24 @@ def cmd_backtest(cfg: Config, args) -> int:
             print(f"ERRO: {e}")
             return 2
         print(dr.format_direction(wf))
+        return 0
+    if getattr(args, "momentum", False):
+        from darwin import momentum as mo
+        try:
+            wf = mo.walk_forward(hist, bt, test_days=args.test_days)
+        except bk.BacktestError as e:
+            print(f"ERRO: {e}")
+            return 2
+        print(mo.format_momentum(wf))
+        try:
+            print(mo.format_catalogue(mo.catalogue(hist, bt, wf=wf)))
+        except bk.BacktestError as e:
+            print(f"(catálogo indisponível: {e})")
+        if getattr(args, "sensitivity", False):
+            try:
+                print(mo.format_sensitivity(mo.sensitivity(hist, bt)))
+            except bk.BacktestError as e:
+                print(f"(sensibilidade indisponível: {e})")
         return 0
     if getattr(args, "rotation", False):
         from darwin import rotation as rot
@@ -328,12 +374,19 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None,
     common.add_argument("--live", action="store_true", help="confirma dinheiro real (exige MODE=live no .env)")
     from darwin import __version__
     p.add_argument("--version", action="version", version=f"darwin_agents v{__version__}")
+    p.add_argument("--env-file", default=".env", help="arquivo de configuração (padrão .env); ex.: --env-file .env.longo")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("check", "init", "status", "report", "liquidate"):
         sub.add_parser(name, parents=[common])
     r = sub.add_parser("run", parents=[common])
     r.add_argument("--max-ticks", type=int, default=None)
     r.add_argument("--liquidate-on-exit", action="store_true")
+    sg = sub.add_parser("signal", help="momentum diário em PAPEL: uma decisão por dia (rode após as 21h)")
+    sg.add_argument("--trend-n", type=int, default=150, help="média do filtro BTC, em dias")
+    sg.add_argument("--long", type=int, default=126, help="janela longa de momentum, em dias")
+    sg.add_argument("--exposure", type=float, default=1.0, help="fração do caixa usada em cada compra (0,5 = metade)")
+    sg.add_argument("--dir", default="data_hist")
+    sg.add_argument("--reset", action="store_true", help="recomeça o papel (guarda o anterior em .bak)")
     d = sub.add_parser("download")
     d.add_argument("--days", type=int, default=90)
     d.add_argument("--timeframe", default=None)
@@ -351,6 +404,10 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None,
     b.add_argument("--trend-filter", action="store_true", help="liga o filtro de tendência longa (SMA 200; na otimização sorteia 50-400)")
     b.add_argument("--direction", action="store_true", help="previsor de direção diária (use --timeframe 1d)")
     b.add_argument("--threshold", type=float, default=0.52, help="prob. mínima de 'sobe' para ficar comprado (--direction)")
+    b.add_argument("--no-guards", action="store_true", help="desliga cooldown e StoplossGuard no backtest (comparar)")
+    b.add_argument("--momentum", action="store_true", help="momentum diário com filtro de mercado BTC (use --timeframe 1d)")
+    b.add_argument("--sensitivity", action="store_true", help="com --momentum: testa 15 combinações de parâmetros")
+    b.add_argument("--test-days", type=int, default=180, help="dias por bloco de teste (--momentum)")
     b.add_argument("--rotation", action="store_true", help="testa a rotação por força relativa (walk-forward)")
     b.add_argument("--folds", type=int, default=3)
     b.add_argument("--trials", type=int, default=30)
@@ -368,15 +425,16 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None,
 
     print(f"darwin_agents v{__version__}")
     if env is None:
-        if not os.path.exists(".env"):
-            print(f"⚠️ Arquivo .env NÃO encontrado em {os.getcwd()}. Usando valores padrão (banca R$ 20, modo paper). "
+        envf = getattr(args, "env_file", ".env") or ".env"
+        if not os.path.exists(envf):
+            print(f"⚠️ Arquivo {envf} NÃO encontrado em {os.getcwd()}. Usando valores padrão (banca R$ 20, modo paper). "
                   "No Windows confira se ele não ficou como '.env.txt' (ative 'Extensões de nomes de arquivos').")
         else:
-            warn = env_file_permission_warning(".env")
+            warn = env_file_permission_warning(envf)
             if warn:
                 print(f"⚠️ {warn}")
-            print(f"(.env carregado de {os.path.abspath('.env')})")
-        env = load_env(".env")
+            print(f"({envf} carregado de {os.path.abspath(envf)})")
+        env = load_env(envf)
     try:
         cfg = load_config(env)
     except ConfigError as e:
@@ -386,6 +444,8 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None,
         return cmd_download(cfg, args, ccxt_module)
     if args.cmd == "backtest":
         return cmd_backtest(cfg, args)
+    if args.cmd == "signal":
+        return cmd_signal(cfg, args, ccxt_module)
     if args.cmd == "journal":
         return cmd_journal(cfg, args)
     try:

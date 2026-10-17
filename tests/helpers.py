@@ -91,7 +91,7 @@ def make_cfg(**kw):
         kw["symbols"] = (kw.pop("symbol"),)
     base = dict(mode="paper", symbols=("BTC/BRL",), bankroll_cents=4000, max_loss_pct=60, tick_seconds=5,
                 eval_min_roundtrips=1, eval_max_ticks=400, max_population=4, max_generation=5,
-                max_orders_per_hour=1000, data_dir="data")
+                max_orders_per_hour=1000, data_dir="data", cooldown_candles=0, stoploss_guard=0)
     base.update(kw)
     return Config(**base)
 

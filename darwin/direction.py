@@ -100,9 +100,15 @@ def simulate(test: list[dict], probs: list[float], n_days: tuple, bt: BacktestCo
     for s, p in zip(test, probs):
         by_day.setdefault(s["t"], []).append((s, p))
     eq, curve, prev, fees, orders, held_days = 1.0, [1.0], {}, 0.0, 0, 0
-    bh_curve, bh = [1.0], 1.0
+    # Benchmark de comprar-e-segurar: divide o capital igualmente no início e deixa
+    # o peso de cada ativo variar com seu próprio retorno (não rebalanceia todo dia).
+    assets = sorted({s["sym"] for s in test})
+    bh_growth = {sym: 1.0 for sym in assets}
+    bh_curve = [1.0]
     for t in range(n_days[0], n_days[1]):
         rows = by_day.get(t, [])
+        for sample, _ in rows:
+            bh_growth[sample["sym"]] *= max(0.0, 1.0 + sample["ret"])
         sig = [s for s, p in rows if p >= thr]
         w = {s["sym"]: 1.0 / len(sig) for s in sig}
         turn = sum(abs(w.get(k, 0.0) - prev.get(k, 0.0)) for k in set(w) | set(prev))
@@ -113,13 +119,11 @@ def simulate(test: list[dict], probs: list[float], n_days: tuple, bt: BacktestCo
         held_days += 1 if sig else 0
         prev = w
         curve.append(eq)
-        if rows:
-            bh *= 1.0 + sum(s["ret"] for s, _ in rows) / len(rows)       # comprar e segurar (rebalanceado diário, sem custo)
-        bh_curve.append(bh)
+        bh_curve.append(sum(bh_growth.values()) / len(bh_growth) if bh_growth else 1.0)
     n = max(1, n_days[1] - n_days[0])
     return {"return_pct": (eq - 1) * 100, "max_drawdown_pct": max_drawdown_pct(curve), "orders": orders,
             "exposure_pct": held_days / n * 100, "fees_pct": fees * 100,
-            "bh_return_pct": (bh - 1) * 100, "bh_drawdown_pct": max_drawdown_pct(bh_curve)}
+            "bh_return_pct": (bh_curve[-1] - 1) * 100, "bh_drawdown_pct": max_drawdown_pct(bh_curve)}
 
 
 def walk_forward(hist: History, bt: BacktestConfig, folds: int = 4, threshold: float = 0.52, l2: float = 1.0) -> dict:
@@ -198,12 +202,13 @@ def format_direction(wf: dict) -> str:
           f"{a['assets']} ativos, {a['n_test']} previsões de teste, limiar de compra {a['threshold']:.2f}",
           f"acurácia {a['accuracy_pct']:.1f}% (IC95% {a['accuracy_ci95'][0]:.1f}% a {a['accuracy_ci95'][1]:.1f}%) | "
           f"dias de alta {a['up_rate_pct']:.1f}%",
-          f"retorno composto: estratégia {_pct(a['strategy_compounded_pct'])} | comprar e segurar {_pct(a['bh_compounded_pct'])} | "
+          f"retorno composto: estratégia {_pct(a['strategy_compounded_pct'])} | comprar e segurar (pesos iguais no início) {_pct(a['bh_compounded_pct'])} | "
           f"períodos positivos {a['positive_folds']}/{a['n_folds']}",
           "pesos do último modelo (em desvios-padrão; >0 = empurra para 'sobe'): "
           + ", ".join(f"{k} {v:+.2f}" for k, v in a["coefs"].items()),
           "\nCONCLUSÃO: " + verdict(a),
-          "Lembrete: pares listados hoje (viés de sobrevivência), execução no fechamento, sem valor mínimo por ordem "
+          "Lembrete: benchmark de comprar-e-segurar com pesos iguais definidos no início e sem rebalanceamento; "
+          "pares listados hoje (viés de sobrevivência), execução no fechamento, sem valor mínimo por ordem "
           "nem passo de lote, custos sobre a variação de posição. O IC trata previsões como independentes "
           "(ativos correlacionados: a confiança real é menor)."]
     return "\n".join(L)

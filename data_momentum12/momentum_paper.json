@@ -1,0 +1,15 @@
+{
+ "bankroll": 50.0,
+ "cash": 25.0,
+ "held": "AVAX/BRL",
+ "qty": 0.49333090322477063,
+ "last_day": "2026-10-17",
+ "log": [
+  {
+   "day": "2026-10-17",
+   "action": "COMPRAR AVAX/BRL",
+   "held": "AVAX/BRL",
+   "equity": 49.9625
+  }
+ ]
+}

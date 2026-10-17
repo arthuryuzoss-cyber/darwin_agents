@@ -105,6 +105,9 @@ class Orchestrator:
         self.trade_log: list[dict] = []   # trades fechados (para relatórios/backtest)
         self.last_pick: dict = {}      # agente -> ativo avaliado/escolhido
         self.last_scan: dict = {}      # agente -> {ativo: nota}
+        self._cool: dict[str, int] = {}     # ativo -> tick até o qual não recompra (cooldown após saída)
+        self._stops: list[int] = []         # ticks dos stop-loss recentes (StoplossGuard)
+        self._pause_until = 0               # tick até o qual não há NOVAS compras
         self.journal: Any = None       # diário de sinais opcional (nunca interfere na operação)
         q = getattr(gateway, "quote", "BRL")
         self.cur = "R$" if q == "BRL" else q
@@ -156,6 +159,20 @@ class Orchestrator:
             raise OrchestratorError("já inicializado; arquive a pasta data/ para recomeçar")
         if self.breaker.is_open():
             raise OrchestratorError("disjuntor aberto")
+        # Uma ordem antiga pode executar fora do controle do robô ou reservar saldo.
+        # Se não for possível verificar ordens abertas, falha fechada: não inicializa.
+        try:
+            open_orders = self.gw.open_orders_count()
+        except Exception as e:
+            raise AccountNotClean(
+                f"não foi possível verificar ordens abertas ({type(e).__name__}); "
+                "cancele/ confira as ordens na exchange e tente novamente"
+            ) from None
+        if open_orders:
+            raise AccountNotClean(
+                f"há {open_orders} ordem(ns) aberta(s) nos pares configurados; "
+                "cancele-as na exchange antes de inicializar o robô"
+            )
         if self.gw.foreign_base_value_cents() > 100:  # mais de 1,00 em algum ativo operado já na conta
             raise AccountNotClean("a conta já tem saldo de ativos que o robô opera; use uma subconta dedicada ao robô")
         equity = self.gw.equity_cents()
@@ -320,8 +337,34 @@ class Orchestrator:
                                "cost_cents": tr.cost_cents, "entry": tr.entry_price, "exit": fill.price})
         tr.qty, tr.cost_cents, tr.entry_price, tr.symbol = 0.0, 0, 0.0, ""
         tr.window_roundtrips += 1
+        self._register_exit(sym, why, rep)
         self.log(f"🔴 {tr.name}: VENDA {sym} ({why}) a {self.cur} {fill.price:.2f} | PnL líquido {self.cur} {pnl/100:+.2f}", rep)
         return pnl
+
+    # ------------------------------------------------------------------- proteções (cooldown / StoplossGuard)
+    def _ticks_per_candle(self) -> int:
+        from .history import TF_MS
+        tf = TF_MS.get(self.cfg.timeframe, 300_000) / 1000
+        return max(1, round(tf / max(1, self.cfg.tick_seconds)))
+
+    def _register_exit(self, sym: str, why: str, rep: TickReport | None) -> None:
+        tpc = self._ticks_per_candle()
+        if self.cfg.cooldown_candles:
+            self._cool[sym] = self.tick_no + self.cfg.cooldown_candles * tpc
+        k = self.cfg.stoploss_guard
+        if k and why == "stop_loss":
+            window = 24 * tpc
+            self._stops = [t for t in self._stops if self.tick_no - t <= window] + [self.tick_no]
+            if len(self._stops) >= k and self._pause_until <= self.tick_no:
+                self._pause_until = self.tick_no + 12 * tpc
+                self.log(f"🛑 proteção: {len(self._stops)} stop-loss em {24} candles; novas compras pausadas por 12 candles", rep)
+
+    def _entry_blocked(self, sym: str) -> str:
+        if self.tick_no < self._pause_until:
+            return "pausa_por_stop_loss"
+        if self.tick_no < self._cool.get(sym, 0):
+            return "cooldown"
+        return ""
 
     # ------------------------------------------------------------------- mercado
     def _candle_limit(self) -> int:
@@ -482,6 +525,9 @@ class Orchestrator:
             return
         self.last_decision[tr.name], self.last_pick[tr.name] = best[1], best[0]
         free_cents = self.ledger.balance(tr.name) - tr.cost_cents
+        blocked = [sym for _, sym in cands if self._entry_blocked(sym)]
+        if blocked:
+            cands = [(sc, sym) for sc, sym in cands if sym not in blocked]
         for _, sym in sorted(cands, reverse=True):
             size = self.risk.size_buy_cents(free_cents, self.min_trade_cents(sym), tr.params.position_fraction)
             if size > 0:

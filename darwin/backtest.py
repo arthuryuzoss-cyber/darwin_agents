@@ -109,6 +109,8 @@ class BacktestConfig:
     idle_kills: bool = False
     death_tolerance_pct: float = 0.0
     needs_min_trades: bool = False
+    cooldown_candles: int = 2
+    stoploss_guard: int = 3
     max_orders_per_hour: int = 12
     fee_rate: float = 0.001
     slippage: float = 0.0005
@@ -208,11 +210,12 @@ def run_backtest(hist: History, bt: BacktestConfig, start: int | None = None, en
                       slippage=bt.slippage)
     gw = MultiGateway(sim, symbols, sleep=lambda s: None)
     cfg = Config(mode="paper", symbols=tuple(gw.symbols), bankroll_cents=bt.bankroll_cents,
-                 max_loss_pct=bt.max_loss_pct, timeframe=bt.timeframe, tick_seconds=5, initial_agents=bt.agents,
+                 max_loss_pct=bt.max_loss_pct, timeframe=bt.timeframe, tick_seconds=int(TF_MS[bt.timeframe] / 1000), initial_agents=bt.agents,
                  eval_min_roundtrips=bt.eval_min_roundtrips, eval_max_ticks=bt.eval_max_ticks,
                  max_population=bt.max_population, max_generation=bt.max_generation,
                  max_orders_per_hour=bt.max_orders_per_hour, idle_kills=bt.idle_kills,
-                 death_tolerance_pct=bt.death_tolerance_pct, needs_min_trades=bt.needs_min_trades)
+                 death_tolerance_pct=bt.death_tolerance_pct, needs_min_trades=bt.needs_min_trades,
+                 cooldown_candles=bt.cooldown_candles, stoploss_guard=bt.stoploss_guard)
     ledger = Ledger()
     breaker = CircuitBreaker(None, None, bt.max_loss_pct)
     risk = RiskBudget(RiskConfig(bt.bankroll_cents, bt.max_loss_pct))

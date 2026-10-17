@@ -1,0 +1,15 @@
+{
+ "bankroll": 50.0,
+ "cash": 25.0,
+ "held": "ETH/BRL",
+ "qty": 0.00202818068981775,
+ "last_day": "2026-10-17",
+ "log": [
+  {
+   "day": "2026-10-17",
+   "action": "COMPRAR ETH/BRL",
+   "held": "ETH/BRL",
+   "equity": 49.9625
+  }
+ ]
+}

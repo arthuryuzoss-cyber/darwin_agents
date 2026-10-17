@@ -75,6 +75,8 @@ class Config:
     death_tolerance_pct: float = 0.0
     needs_min_trades: bool = False
     max_stale_candles: int = 3          # candle mais novo mais velho que (1+N) períodos = dado desatualizado
+    cooldown_candles: int = 2           # após vender um ativo, não recompra por N candles (0 = desligado)
+    stoploss_guard: int = 3             # K stop-loss em 24 candles pausa TODAS as novas compras por 12 candles (0 = desligado)
     revive: bool = True               # extinção: renasce 1 agente (mutado) com o capital restante, se viável
     params_file: str | None = None
     trend_period: int = 0
@@ -207,6 +209,8 @@ def load_config(env: Mapping[str, str]) -> Config:
         death_tolerance_pct=_float(env, "DEATH_TOLERANCE_PCT", 0.0, 0.0, 20.0),
         needs_min_trades=env.get("DEATH_NEEDS_MIN_TRADES", "").strip().lower() in ("1", "true", "yes", "sim"),
         max_stale_candles=_int(env, "MAX_STALE_CANDLES", 3, 1, 100),
+        cooldown_candles=_int(env, "COOLDOWN_CANDLES", 2, 0, 1000),
+        stoploss_guard=_int(env, "STOPLOSS_GUARD", 3, 0, 100),
         revive=env.get("REVIVE", "true").strip().lower() not in ("0", "false", "no", "nao", "não"),
         ollama_model=env.get("OLLAMA_MODEL", "llama3.2").strip() or "llama3.2",
         ollama_host=env.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip(),
